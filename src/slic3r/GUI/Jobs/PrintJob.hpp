@@ -97,6 +97,7 @@ public:
     bool        task_ext_change_assist { false };
     bool        task_timelapse_use_internal { false };
     bool        m_add_to_print_queue { false };
+    bool        skip_vibration_check { false };
 
     int         auto_bed_leveling{0};
     int         auto_flow_cali{0};

@@ -21,9 +21,131 @@
 
 #include "slic3r/Utils/FileTransferUtils.hpp"
 #include "libslic3r/Log.hpp"
+#include <libslic3r/miniz_extension.hpp>
+#include <openssl/md5.h>
 
 namespace Slic3r {
 namespace GUI {
+
+// The pre-print "mech mode fast check" sweeps the gantry and is loud. Bambu
+// Lab's own guidance for silencing it is to comment out the M970.x / M974
+// check lines while keeping M975 enabled, so the printer keeps compensating
+// with its last measurement.
+// https://wiki.bambulab.com/en/knowledge-sharing/how-to-turn-off-the-vibration-calibration
+static bool is_vibration_check_line(const std::string &line)
+{
+    size_t i = line.find_first_not_of(" \t");
+    if (i == std::string::npos)
+        return false;
+    const char *s = line.c_str() + i;
+    if (strncmp(s, "M970", 4) == 0 || strncmp(s, "M974", 4) == 0) {
+        const char c = s[4];
+        return c == '\0' || c == ' ' || c == '\t' || c == ';' || c == '\r' || c == '.';
+    }
+    return false;
+}
+
+static std::string comment_out_vibration_check(const std::string &gcode)
+{
+    std::string out;
+    out.reserve(gcode.size());
+    size_t start = 0;
+    while (start < gcode.size()) {
+        size_t end = gcode.find('\n', start);
+        size_t len = (end == std::string::npos ? gcode.size() : end) - start;
+        if (is_vibration_check_line(gcode.substr(start, len)))
+            out += ';';
+        out.append(gcode, start, len);
+        out += '\n';
+        if (end == std::string::npos)
+            break;
+        start = end + 1;
+    }
+    return out;
+}
+
+// Rewrite the sliced gcode.3mf with the selected plate's vibration check
+// lines commented out. Also refreshes the plate gcode md5 member so the
+// archive stays self-consistent. Returns src unchanged on any failure so
+// the print proceeds exactly as before.
+static std::string make_no_vibration_3mf(const fs::path &src, int plate_index)
+{
+    const std::string src_str = src.string();
+    if (plate_index < 1)
+        return src_str;
+
+    const std::string plate_entry = (boost::format("Metadata/plate_%d.gcode") % plate_index).str();
+    const fs::path    dst         = src_str + ".novib";
+
+    mz_zip_archive zip_in;
+    mz_zip_zero_struct(&zip_in);
+    if (!open_zip_reader(&zip_in, src_str)) {
+        BOOST_LOG_TRIVIAL(error) << "print_job: novib: cannot open " << src_str;
+        return src_str;
+    }
+
+    std::vector<std::pair<std::string, std::string>> entries;
+    mz_uint num = mz_zip_reader_get_num_files(&zip_in);
+    for (mz_uint i = 0; i < num; ++i) {
+        mz_zip_archive_file_stat st;
+        if (!mz_zip_reader_file_stat(&zip_in, i, &st)) {
+            close_zip_reader(&zip_in);
+            return src_str;
+        }
+        std::string name = st.m_filename ? st.m_filename : "";
+        std::string data;
+        if (st.m_uncomp_size > 0) {
+            data.resize(st.m_uncomp_size);
+            if (!mz_zip_reader_extract_to_mem(&zip_in, i, data.data(), data.size(), 0)) {
+                close_zip_reader(&zip_in);
+                return src_str;
+            }
+        }
+        if (name == plate_entry)
+            data = comment_out_vibration_check(data);
+        entries.emplace_back(std::move(name), std::move(data));
+    }
+    close_zip_reader(&zip_in);
+
+    mz_zip_archive zip_out;
+    mz_zip_zero_struct(&zip_out);
+    if (!open_zip_writer(&zip_out, dst.string())) {
+        BOOST_LOG_TRIVIAL(error) << "print_job: novib: cannot create " << dst.string();
+        return src_str;
+    }
+
+    bool ok = true;
+    for (auto &entry : entries) {
+        if (entry.first == plate_entry + ".md5") {
+            // match the md5 member to the rewritten gcode member
+            for (auto &g : entries) {
+                if (g.first == plate_entry) {
+                    unsigned char digest[MD5_DIGEST_LENGTH];
+                    MD5((const unsigned char *) g.second.data(), g.second.size(), digest);
+                    char md5_str[MD5_DIGEST_LENGTH * 2 + 1];
+                    for (int j = 0; j < MD5_DIGEST_LENGTH; j++)
+                        sprintf(&md5_str[j * 2], "%02X", (unsigned int) digest[j]);
+                    entry.second.assign(md5_str);
+                    break;
+                }
+            }
+        }
+        if (!mz_zip_writer_add_mem(&zip_out, entry.first.c_str(), entry.second.data(), entry.second.size(), MZ_DEFAULT_COMPRESSION))
+            ok = false;
+    }
+
+    if (ok && !mz_zip_writer_finalize_archive(&zip_out))
+        ok = false;
+    mz_zip_writer_end(&zip_out);
+
+    if (!ok) {
+        BOOST_LOG_TRIVIAL(error) << "print_job: novib: rewriting failed, sending original gcode";
+        boost::system::error_code ec;
+        fs::remove(dst, ec);
+        return src_str;
+    }
+    return dst.string();
+}
 
 #define CHECK_GCODE_FAILED_STR      _L("Abnormal print file data. Please slice again.")
 #define PRINTJOB_CANCEL_STR         _L("Task canceled.")
@@ -272,6 +394,13 @@ void PrintJob::process()
     } else {
         params.filename        = job_data._3mf_path.string();
         params.config_filename = job_data._3mf_config_path.string();
+        if (skip_vibration_check) {
+            std::string rewritten = make_no_vibration_3mf(job_data._3mf_path, curr_plate_idx);
+            if (rewritten != params.filename) {
+                BOOST_LOG_TRIVIAL(info) << "print_job: vibration check disabled by print option, sending rewritten gcode: " << rewritten;
+                params.filename = rewritten;
+            }
+        }
     }
 
     if (is_imported_3mf) {

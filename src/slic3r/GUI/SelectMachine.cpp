@@ -809,6 +809,11 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     );
     option_nozzle_offset_cali_cali->Bind(EVT_SWITCH_PRINT_OPTION, &SelectMachineDialog::on_nozzle_offset_option_changed, this);
 
+    auto option_vibration_cali = new PrintOption(
+        m_options_other, _L("Vibration Compensation"),
+        _L("Run a short vibration check of the transmission system before printing (this is the loud hum at print start).\nOff: skip the check; the printer keeps using the last calibration result."),
+        ops_no_auto, "vibration_cali");
+
     m_pa_value_panel = new wxPanel(m_options_other);
     m_pa_value_panel->SetMaxSize(wxSize(FromDIP(315), -1));
     m_pa_value_panel->SetMinSize(wxSize(FromDIP(315), -1));
@@ -855,6 +860,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_sizer_options->Add(option_auto_bed_level, 0, wxEXPAND);
     m_sizer_options->Add(option_flow_dynamics_cali, 0, wxEXPAND);
     m_sizer_options->Add(option_nozzle_offset_cali_cali, 0, wxEXPAND);
+    m_sizer_options->Add(option_vibration_cali, 0, wxEXPAND);
 
     m_options_line_panel = new wxPanel(m_options_other, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL);
     m_options_line_panel->SetBackgroundColour(*wxWHITE);
@@ -906,6 +912,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_checkbox_list_order.push_back(option_auto_bed_level);
     m_checkbox_list_order.push_back(option_flow_dynamics_cali);
     m_checkbox_list_order.push_back(option_nozzle_offset_cali_cali);
+    m_checkbox_list_order.push_back(option_vibration_cali);
 
     m_options_other->SetSizer(options_sizer);
     m_options_other->Layout();
@@ -915,6 +922,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     m_checkbox_list["bed_leveling"]  = option_auto_bed_level;
     m_checkbox_list["flow_cali"]     = option_flow_dynamics_cali;
     m_checkbox_list["nozzle_offset_cali"] = option_nozzle_offset_cali_cali;
+    m_checkbox_list["vibration_cali"] = option_vibration_cali;
     for (auto print_opt : m_checkbox_list_order) {
         print_opt->Bind(EVT_SWITCH_PRINT_OPTION, [this](auto& e) { save_option_vals(); e.Skip();});
     }
@@ -922,6 +930,7 @@ SelectMachineDialog::SelectMachineDialog(Plater *plater)
     option_auto_bed_level->Hide();
     option_flow_dynamics_cali->Hide();
     option_nozzle_offset_cali_cali->Hide();
+    option_vibration_cali->Hide();
 
     m_simplebook   = new wxSimplebook(this, wxID_ANY, wxDefaultPosition, SELECT_MACHINE_DIALOG_SIMBOOK_SIZE2, 0);
     m_simplebook->SetMinSize(SELECT_MACHINE_DIALOG_SIMBOOK_SIZE2);
@@ -2925,6 +2934,9 @@ void SelectMachineDialog::update_option_opts(MachineObject *obj)
     }
     m_checkbox_list["flow_cali"]->Show(obj->is_support_pa_calibration);
 
+    /*vibration_cali*/
+    m_checkbox_list["vibration_cali"]->Show();
+
     update_options_layout();
 }
 
@@ -3739,6 +3751,11 @@ void SelectMachineDialog::on_send_print()
     if (timelapse_option && obj_->is_support_internal_timelapse && !m_timelapse_storage.empty()) {
         m_print_job->task_timelapse_use_internal = (m_timelapse_storage == "internal");
     }
+
+    // "Vibration Compensation" off: rewrite the plate gcode to skip the loud
+    // pre-print vibration check (see PrintJob::process).
+    m_print_job->skip_vibration_check = m_checkbox_list["vibration_cali"]->IsShown() &&
+        m_checkbox_list["vibration_cali"]->getValue() == "off";
 
     m_print_job->set_print_config(
         MachineBedTypeString[0],
