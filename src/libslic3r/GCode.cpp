@@ -3879,8 +3879,11 @@ void GCode::process_layers(
     const auto spiral_mode = tbb::make_filter<GCode::LayerResult, GCode::LayerResult>(
         slic3r_tbb_filtermode::serial_in_order, [&spiral_mode = *this->m_spiral_vase.get(), & layers_to_print](GCode::LayerResult in) -> GCode::LayerResult {
             spiral_mode.enable(in.spiral_vase_enable);
+            spiral_mode.set_wall_count(in.spiral_vase_wall_count);
             bool last_layer = in.layer_id == layers_to_print.size() - 1;
-            return {spiral_mode.process_layer(std::move(in.gcode), last_layer), in.layer_id, in.spiral_vase_enable, in.cooling_buffer_flush, in.gcode_store_pos};
+            GCode::LayerResult out{spiral_mode.process_layer(std::move(in.gcode), last_layer), in.layer_id, in.spiral_vase_enable, in.cooling_buffer_flush, in.gcode_store_pos};
+            out.spiral_vase_wall_count = in.spiral_vase_wall_count;
+            return out;
         });
 
     std::vector<std::vector<PerExtruderAdjustments>> layers_extruder_adjustments(layers_to_print.size());
@@ -4018,8 +4021,11 @@ void GCode::process_layers(
     const auto spiral_mode = tbb::make_filter<GCode::LayerResult, GCode::LayerResult>(
         slic3r_tbb_filtermode::serial_in_order, [&spiral_mode = *this->m_spiral_vase.get(), &layers_to_print](GCode::LayerResult in) -> GCode::LayerResult {
             spiral_mode.enable(in.spiral_vase_enable);
+            spiral_mode.set_wall_count(in.spiral_vase_wall_count);
             bool last_layer = in.layer_id == layers_to_print.size() - 1;
-            return {spiral_mode.process_layer(std::move(in.gcode), last_layer), in.layer_id, in.spiral_vase_enable, in.cooling_buffer_flush, in.gcode_store_pos};
+            GCode::LayerResult out{spiral_mode.process_layer(std::move(in.gcode), last_layer), in.layer_id, in.spiral_vase_enable, in.cooling_buffer_flush, in.gcode_store_pos};
+            out.spiral_vase_wall_count = in.spiral_vase_wall_count;
+            return out;
         });
 
     //BBS: get objects and nodes info, for better arrange
@@ -4978,16 +4984,24 @@ GCode::LayerResult GCode::process_layer(
     m_enable_loop_clipping = true;
     if (m_spiral_vase && layers.size() == 1 && support_layer == nullptr) {
         bool enable = (layer.id() > 0 || !print.has_brim()) && (layer.id() >= (size_t)print.config().skirt_height.value && ! print.has_infinite_skirt());
+        // egon-r fork: multi-wall spiral vase allows exactly wall_loops perimeter
+        // loops per layer (each becomes its own helix in SpiralVase). Otherwise
+        // a layer is eligible only with a single perimeter loop.
+        const bool multi_wall        = print.config().spiral_mode_multi_wall;
+        size_t      expected_walls   = 1;
+        if (multi_wall && !layer.regions().empty())
+            expected_walls = std::max(1, layer.regions().front()->region().config().wall_loops.value);
         if (enable) {
             for (const LayerRegion *layer_region : layer.regions())
                 if (size_t(layer_region->region().config().bottom_shell_layers.value) > layer.id() ||
-                    layer_region->perimeters.items_count() > 1u ||
+                    layer_region->perimeters.items_count() != expected_walls ||
                     layer_region->fills.items_count() > 0) {
                     enable = false;
                     break;
                 }
         }
-        result.spiral_vase_enable = enable;
+        result.spiral_vase_enable      = enable;
+        result.spiral_vase_wall_count  = enable ? expected_walls : 1;
         // If we're going to apply spiralvase to this layer, disable loop clipping.
         m_enable_loop_clipping = !enable;
     }

@@ -6127,6 +6127,15 @@ void PrintConfigDef::init_fff_params()
     def->mode = comSimple;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("spiral_mode_multi_wall", coBool);
+    def->label = L("Multi-wall spiral (experimental)");
+    def->tooltip = L("EXPERIMENTAL: allow multiple walls in spiral vase mode. Each wall is printed as its "
+                     "own continuous helix with a small vertical offset between walls; the nozzle hops Z "
+                     "down slightly on the move between walls. Keep wall count low (2-3) and use classic "
+                     "wall generator. Untested on hardware - verify on a test print first.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
     def = this->add("spiral_mode_smooth", coBool);
     def->label = L("Smooth Spiral");
     def->tooltip = L("Smooth Spiral smoothes out X and Y moves as well"
@@ -8740,7 +8749,8 @@ void DynamicPrintConfig::normalize_fdm()
             opt_n->values.assign(opt_n->values.size(), false);  // Set all values to false.
         }
         {
-            this->opt<ConfigOptionInt>("wall_loops", true)->value       = 1;
+            if (!(this->has("spiral_mode_multi_wall") && this->opt<ConfigOptionBool>("spiral_mode_multi_wall", true)->value))
+                this->opt<ConfigOptionInt>("wall_loops", true)->value = 1;
             this->opt<ConfigOptionInt>("top_shell_layers", true)->value = 0;
             this->opt<ConfigOptionPercent>("sparse_infill_density", true)->value = 0;
         }
@@ -8789,7 +8799,8 @@ void DynamicPrintConfig::normalize_fdm_1()
             opt_n->values.assign(opt_n->values.size(), false);  // Set all values to false.
         }
         {
-            this->opt<ConfigOptionInt>("wall_loops", true)->value       = 1;
+            if (!(this->has("spiral_mode_multi_wall") && this->opt<ConfigOptionBool>("spiral_mode_multi_wall", true)->value))
+                this->opt<ConfigOptionInt>("wall_loops", true)->value = 1;
             this->opt<ConfigOptionInt>("top_shell_layers", true)->value = 0;
             this->opt<ConfigOptionPercent>("sparse_infill_density", true)->value = 0;
         }
@@ -10797,8 +10808,8 @@ std::map<std::string, std::string> validate(const FullPrintConfig &cfg, bool und
     //for non-cli case, we will popup dialog for spiral mode correction
     if (cfg.spiral_mode && under_cli) {
         // Note that we might want to have more than one perimeter on the bottom
-        // solid layers.
-        if (cfg.wall_loops != 1) {
+        // solid layers. Multi-wall spiral vase (egon-r fork) allows wall_loops > 1.
+        if (cfg.wall_loops != 1 && !cfg.spiral_mode_multi_wall) {
             error_message.emplace("wall_loops", L("Invalid value when spiral vase mode is enabled: ") + std::to_string(cfg.wall_loops));
             //return "Can't make more than one perimeter when spiral vase mode is enabled";
             //return "Can't make less than one perimeter when spiral vase mode is enabled";

@@ -338,6 +338,8 @@ private:
         size_t      layer_id;
         // Is spiral vase post processing enabled for this layer?
         bool        spiral_vase_enable { false };
+        // egon-r fork: wall count for multi-wall spiral vase (1 = classic).
+        size_t      spiral_vase_wall_count { 1 };
         // Should the cooling buffer content be flushed at the end of this layer?
         bool        cooling_buffer_flush { false };
         // the layer store pos of gcode
@@ -354,6 +356,7 @@ private:
             gcode = std::move(other.gcode);
             layer_id = other.layer_id;
             spiral_vase_enable = other.spiral_vase_enable;
+            spiral_vase_wall_count = other.spiral_vase_wall_count;
             cooling_buffer_flush = other.cooling_buffer_flush;
             gcode_store_pos = other.gcode_store_pos;
             layer_time     = other.layer_time;
@@ -365,6 +368,7 @@ private:
                 gcode = std::move(other.gcode);
                 layer_id = other.layer_id;
                 spiral_vase_enable = other.spiral_vase_enable;
+                spiral_vase_wall_count = other.spiral_vase_wall_count;
                 cooling_buffer_flush = other.cooling_buffer_flush;
                 gcode_store_pos = other.gcode_store_pos;
                 layer_time      = other.layer_time;

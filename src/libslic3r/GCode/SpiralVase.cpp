@@ -2,6 +2,7 @@
 #include "GCode.hpp"
 #include <sstream>
 #include <cmath>
+#include <numeric>
 #include <limits>
 
 namespace Slic3r {
@@ -87,6 +88,10 @@ std::string SpiralVase::process_layer(const std::string &gcode, bool last_layer)
         m_reader.parse_buffer(gcode);
         return gcode;
     }
+
+    // egon-r fork: multi-wall spiral vase
+    if (m_wall_count > 1)
+        return process_layer_multi_wall(gcode, last_layer);
     
     // Get total XY length for this layer by summing all extrusion moves.
     float total_layer_length = 0;
@@ -211,6 +216,167 @@ std::string SpiralVase::process_layer(const std::string &gcode, bool last_layer)
     });
 
     m_previous_layer = current_layer;
+
+    return new_gcode + transition_gcode;
+}
+
+std::string SpiralVase::process_layer_multi_wall(const std::string &gcode, bool last_layer)
+{
+    /*  Multi-wall spiral vase (egon-r fork, EXPERIMENTAL).
+
+        The layer consists of N travel-delimited extrusion runs, one per wall
+        loop. Wall r is turned into its own continuous helix of pitch
+        layer_height: its Z ramps from (layer_base + r*h/N) up by a full
+        layer height over the course of its loop. The move to the next wall's
+        start point then drops Z back down by (h - h/N); that drop happens on
+        the first (short, seam-blended) extrusion move of the next wall since
+        travel moves are dropped, exactly like the classic seam blend.
+
+        Fallback: if the layer does not contain exactly N runs, it is emitted
+        unchanged (with discrete layer Z) so a bad layer degrades to a normal
+        layer instead of corrupting the print. */
+
+    // Phase A: measure the layer with a cloned reader: base Z, height and
+    // per-run extrusion lengths.
+    float              z            = 0.f;
+    float              layer_height = 0.f;
+    std::vector<float> run_lengths;
+    {
+        GCodeReader r = m_reader; // clone
+        bool set_z = false;
+        int  run   = -1;
+        r.parse_buffer(gcode, [&z, &set_z, &run, &run_lengths, &layer_height](GCodeReader &reader, const GCodeReader::GCodeLine &line) {
+            if (line.cmd_is("G1")) {
+                float dist_XY = line.dist_XY(reader);
+                if (line.extruding(reader)) {
+                    if (run < 0) run = 0;
+                    if ((size_t) run >= run_lengths.size()) run_lengths.push_back(0.f);
+                    run_lengths[run] += dist_XY;
+                } else if (dist_XY > 0) {
+                    // travel move: the following extrusions belong to the next run
+                    ++run;
+                } else if (line.has(Z)) {
+                    layer_height += line.dist_Z(reader);
+                    if (!set_z) { z = line.new_Z(reader); set_z = true; }
+                }
+            }
+        });
+    }
+
+    const size_t wall_count = m_wall_count;
+    if (run_lengths.size() != wall_count || layer_height <= 0.f) {
+        BOOST_LOG_TRIVIAL(warning) << "spiral multi-wall: expected " << wall_count << " runs, got " << run_lengths.size()
+                                   << "; emitting layer unmodified";
+        m_reader.parse_buffer(gcode);
+        return gcode;
+    }
+    for (float l : run_lengths)
+        if (l <= 0.f) {
+            BOOST_LOG_TRIVIAL(warning) << "spiral multi-wall: empty run; emitting layer unmodified";
+            m_reader.parse_buffer(gcode);
+            return gcode;
+        }
+
+    // Remove layer height from initial Z: base of wall 0.
+    z -= layer_height;
+
+    const float total_layer_length = std::accumulate(run_lengths.begin(), run_lengths.end(), 0.f);
+    const bool  transition_in  = m_transition_layer && m_config.use_relative_e_distances.value;
+    const bool  transition_out = last_layer && m_config.use_relative_e_distances.value;
+    const bool  smooth_spiral  = m_smooth_spiral;
+    const float max_xy_dist_for_smoothing = m_max_xy_smoothing;
+
+    std::string new_gcode;
+    std::string transition_gcode;
+
+    // Per-run state for emission.
+    std::vector<float> run_len(wall_count, 0.f);
+    // Per-run point history for smooth spiral interpolation.
+    std::vector<std::shared_ptr<std::vector<SpiralPoint>>> current_runs(wall_count);
+    std::vector<SpiralPoint>                               last_points(wall_count, SpiralPoint(0, 0));
+    std::vector<char>                                      has_last_point(wall_count, 0);
+    const std::vector<std::shared_ptr<std::vector<SpiralPoint>>> &previous_runs = m_previous_layer_runs;
+    const bool have_previous = previous_runs.size() == wall_count;
+
+    float len_global = 0.f; // cumulative extrusion length across the whole layer (for E ramps)
+    int   run        = -1;
+
+    m_reader.parse_buffer(gcode, [&](GCodeReader &reader, GCodeReader::GCodeLine line) {
+        if (line.cmd_is("G1")) {
+            if (line.has_z()) {
+                // Initial Z move of the layer: replace it with a (redundant)
+                // move to the base of wall 0.
+                line.set(reader, Z, z);
+                new_gcode += line.raw() + '\n';
+                return;
+            }
+            float dist_XY = line.dist_XY(reader);
+            if (dist_XY > 0) {
+                if (line.extruding(reader)) { // Exclude wipe and retract
+                    if (run < 0) run = 0;
+                    const size_t r = (size_t) run;
+                    run_len[r] += dist_XY;
+                    len_global += dist_XY;
+
+                    const float factor_global = len_global / total_layer_length;
+                    const float factor_run    = run_len[r] / run_lengths[r];
+                    // Wall r's own helix: base offset r*h/N, ramping a full layer height.
+                    const float wall_base = z + (float) r * layer_height / (float) wall_count;
+
+                    if (transition_in)
+                        line.set(reader, E, line.e() * factor_global, 5);
+                    else if (transition_out) {
+                        GCodeReader::GCodeLine transitionLine(line);
+                        transitionLine.set(reader, E, line.e() * (1 - factor_global), 5);
+                        transition_gcode += transitionLine.raw() + '\n';
+                    }
+                    line.set(reader, Z, wall_base + factor_run * layer_height);
+
+                    if (smooth_spiral) {
+                        SpiralVase::SpiralPoint p(line.x(), line.y());
+                        if (!current_runs[r]) current_runs[r] = std::make_shared<std::vector<SpiralPoint>>();
+                        current_runs[r]->push_back(p);
+                        if (have_previous && previous_runs[r]) {
+                            bool  found = false;
+                            float dist  = 0;
+                            SpiralVase::SpiralPoint nearestp = SpiralVaseHelpers::nearest_point_on_lines(p, previous_runs[r], found, dist);
+                            if (found && dist < max_xy_dist_for_smoothing) {
+                                SpiralVase::SpiralPoint target = SpiralVaseHelpers::add(SpiralVaseHelpers::scale(nearestp, 1 - factor_run),
+                                                                                         SpiralVaseHelpers::scale(p, factor_run));
+                                float modified_dist_XY = has_last_point[r] ? SpiralVaseHelpers::distance(last_points[r], target) : dist;
+                                if (modified_dist_XY < 0.001) {
+                                    line.clear();
+                                } else {
+                                    line.set(reader, X, target.x);
+                                    line.set(reader, Y, target.y);
+                                    line.set(reader, E, line.e() * modified_dist_XY / dist_XY, 5);
+                                    last_points[r]    = target;
+                                    has_last_point[r] = 1;
+                                }
+                            } else if (!has_last_point[r]) {
+                                last_points[r]    = p;
+                                has_last_point[r] = 1;
+                            }
+                        } else if (!has_last_point[r]) {
+                            last_points[r]    = p;
+                            has_last_point[r] = 1;
+                        }
+                    }
+                    new_gcode += line.raw() + '\n';
+                } else {
+                    // travel move - dropped like the classic seam blend; the
+                    // following extrusions belong to the next run.
+                    ++run;
+                }
+                return;
+            }
+        }
+        new_gcode += line.raw() + '\n';
+        if (transition_out)
+            transition_gcode += line.raw() + '\n';
+    });
+
+    m_previous_layer_runs = current_runs;
 
     return new_gcode + transition_gcode;
 }
