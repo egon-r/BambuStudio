@@ -92,7 +92,7 @@
         "Direct Drive High Flow"
     ],
     "smooth_coefficient": "150",
-    "sparse_infill_pattern": "gyroid",
+    "sparse_infill_pattern": "grid",
     "sparse_infill_speed": [
         "200",
         "200"

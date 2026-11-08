@@ -98,7 +98,7 @@
         "2",
         "2"
     ],
-    "sparse_infill_pattern": "gyroid",
+    "sparse_infill_pattern": "grid",
     "sparse_infill_speed": [
         "180",
         "180",

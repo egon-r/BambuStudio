@@ -197,7 +197,7 @@
         "Direct Drive TPU High Flow",
         "Direct Drive E3D High Flow"
     ],
-    "sparse_infill_pattern": "gyroid",
+    "sparse_infill_pattern": "grid",
     "sparse_infill_speed": [
         "100",
         "100",

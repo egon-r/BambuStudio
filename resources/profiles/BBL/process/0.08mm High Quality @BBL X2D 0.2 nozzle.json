@@ -58,7 +58,7 @@
         "Bowden Standard",
         "Bowden High Flow"
     ],
-    "sparse_infill_pattern": "gyroid",
+    "sparse_infill_pattern": "grid",
     "travel_speed": [
         "1000",
         "1000",

@@ -22,7 +22,7 @@
     "outer_wall_acceleration": [
         "2000"
     ],
-    "sparse_infill_pattern": "gyroid",
+    "sparse_infill_pattern": "grid",
     "travel_speed": [
         "700"
     ],

@@ -34,7 +34,7 @@
         "225"
     ],
     "smooth_coefficient": "4",
-    "sparse_infill_pattern": "gyroid",
+    "sparse_infill_pattern": "grid",
     "travel_acceleration": [
         "8000"
     ],
