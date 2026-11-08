@@ -2547,6 +2547,23 @@ void Print::process(std::unordered_map<std::string, long long>* slice_time, bool
         const long long wipe_tower_begin_time =
             slice_time ? Slic3r::Utils::get_current_milliseconds_time_monotonic() : 0;
         {
+            // egon-r fork: warn when gyroid infill is in use. Gyroid's
+            // continuous curved paths shake the printer frame and are loud;
+            // suggest quieter alternatives. Non-critical: slicing continues.
+            bool gyroid_infill = false;
+            for (size_t region_idx = 0; region_idx < this->num_print_regions(); ++region_idx)
+                if (this->get_print_region(region_idx).config().sparse_infill_pattern == ipGyroid)
+                    gyroid_infill = true;
+            if (gyroid_infill) {
+                std::string gyroid_warning =
+                    "Sparse infill pattern is Gyroid. Its continuous curved paths cause strong frame "
+                    "vibration and noise. Consider \"3D Honeycomb\" (similar strength, much quieter) or "
+                    "\"Line\" (quietest) under Strength - Sparse infill pattern. Slicing continues with Gyroid.";
+                this->active_step_add_warning(PrintStateBase::WarningLevel::NON_CRITICAL, gyroid_warning, PrintStateBase::SlicingGyroidInfill);
+                this->status_update_warnings(psWipeTower, PrintStateBase::WarningLevel::NON_CRITICAL, gyroid_warning, nullptr, PrintStateBase::SlicingGyroidInfill);
+            }
+        }
+        {
             std::vector<std::set<int>> geometric_unprintables(m_config.nozzle_diameter.size());
             for (PrintObject* obj : m_objects) {
                 std::vector<std::set<int>> obj_geometric_unprintables = obj->detect_extruder_geometric_unprintables();
