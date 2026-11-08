@@ -2595,7 +2595,9 @@ static LogEncOptions s_get_log_enc_opts()
         assert(0 && "get_value_from_config failed");
     }// there are file errors
 
-    enc_options.enc_type = LogEncOptions::LOG_ENC_AES_256_CBC;
+    // egon-r fork: always write plain-text logs; the AES-encrypted studio log
+    // cannot be read without Bambu's key service, which is useless locally.
+    enc_options.enc_type = LogEncOptions::LOG_ENC_NONE;
     if (enc_options.enc_type == LogEncOptions::LOG_ENC_AES_256_CBC) {
         std::string enc_key_url;
         std::string enc_key_host_env;
@@ -2615,7 +2617,6 @@ static LogEncOptions s_get_log_enc_opts()
         enc_options.enc_key_url = enc_key_url;
         enc_options.enc_key_host_env = enc_key_host_env;
     }
-
 #else
     enc_options.enc_type = LogEncOptions::LOG_ENC_NONE;
 #endif
