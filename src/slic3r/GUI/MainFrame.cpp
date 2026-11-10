@@ -3059,6 +3059,12 @@ void MainFrame::init_menubar_as_editor()
             [this](wxCommandEvent&) { if (m_plater) m_plater->load_project(); }, "", nullptr,
             [this](){return can_open_project(); }, this);
 #endif
+        // egon-r fork: restore the G-code viewer entry BBL disabled
+        // ("BBS do not show gcode viewer menu"). Loads the raw .gcode file
+        // into the plater in gcode-only preview mode.
+        append_menu_item(fileMenu, wxID_ANY, _L("Open G-code") + dots + "\t" + ctrl + "Shift+O", _L("Open a G-code file"),
+            [this](wxCommandEvent&) { if (m_plater) m_plater->load_gcode(); }, "menu_open", nullptr,
+            [this](){ return m_plater != nullptr; }, this);
 
         // Recent Project
         wxMenu* recent_projects_menu = new wxMenu();
