@@ -1547,15 +1547,20 @@ std::vector<int> PartPlate::get_used_filaments()
         // slice_filaments_info (only .gcode.3mf projects fill it), so the
         // send dialog builds no filament mapping UI and blocks with
         // "Not all filaments used in slicing are mapped to the printer".
-        // Fall back to the per-extruder usage stats of the processed gcode
-        // so the mapping chips get created.
-        if (used_filaments.empty() && wxGetApp().plater() && wxGetApp().plater()->only_gcode_mode()) {
+        // Fall back to the per-extruder usage stats of the processed gcode.
+        // Note: do NOT gate on Plater::only_gcode_mode() here - that flag is
+        // cleared by every background config re-apply (AMS status sync), so
+        // it does not survive until the send dialog is opened. An empty
+        // project plate yields no volumes and stays empty.
+        if (used_filaments.empty()) {
             GCodeProcessorResult* result = get_slice_result();
             if (result) {
                 std::set<int> used_extruders_set;
                 for (const auto& item : result->print_statistics.total_volumes_per_extruder)
                     used_extruders_set.emplace(item.first + 1);
                 used_filaments.assign(used_extruders_set.begin(), used_extruders_set.end());
+                if (!used_filaments.empty())
+                    BOOST_LOG_TRIVIAL(info) << "[egon-r] raw gcode plate: derived " << used_filaments.size() << " used filament(s) from gcode stats";
             }
         }
         return used_filaments;
