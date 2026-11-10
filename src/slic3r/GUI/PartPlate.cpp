@@ -1543,6 +1543,21 @@ std::vector<int> PartPlate::get_used_filaments()
 {
 	std::vector<int> used_filaments;
     if (check_objects_empty_and_gcode3mf(used_filaments)) {
+        // egon-r fork: a raw .gcode loaded in gcode-only mode has no
+        // slice_filaments_info (only .gcode.3mf projects fill it), so the
+        // send dialog builds no filament mapping UI and blocks with
+        // "Not all filaments used in slicing are mapped to the printer".
+        // Fall back to the per-extruder usage stats of the processed gcode
+        // so the mapping chips get created.
+        if (used_filaments.empty() && wxGetApp().plater() && wxGetApp().plater()->only_gcode_mode()) {
+            GCodeProcessorResult* result = get_slice_result();
+            if (result) {
+                std::set<int> used_extruders_set;
+                for (const auto& item : result->print_statistics.total_volumes_per_extruder)
+                    used_extruders_set.emplace(item.first + 1);
+                used_filaments.assign(used_extruders_set.begin(), used_extruders_set.end());
+            }
+        }
         return used_filaments;
     }
 
