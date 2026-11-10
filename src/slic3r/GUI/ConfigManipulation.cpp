@@ -473,7 +473,7 @@ void ConfigManipulation::update_print_fff_config(DynamicPrintConfig* config, con
                                      config->opt_bool("enable_wrapping_detection"));
     }
     if (config->opt_bool("spiral_mode") && !adjust_spiral_mode_params) {
-        const bool multi_wall = config->opt_bool("spiral_mode_multi_wall");
+        const bool multi_wall = config->has("spiral_mode_multi_wall") && config->opt_bool("spiral_mode_multi_wall");
         adjust_spiral_mode_params = ((config->opt_int("wall_loops") != 1 && !multi_wall) ||
                                      config->opt_int("top_shell_layers") != 0 || sparse_infill_density != 0 ||
                                      config->opt_bool("enable_support") ||
