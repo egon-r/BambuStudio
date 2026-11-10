@@ -10,7 +10,7 @@ section is the upstream README.
 
 | Change | Commit | Notes |
 |---|---|---|
-| **Multi-wall spiral vase** (EXPERIMENTAL) | `190e114c` | New `spiral_mode_multi_wall` option: with spiral vase on, `wall_loops` may exceed 1 and each wall prints as its own continuous helix of pitch `layer_height`, walls phased `h/N` apart in Z, nozzle hops Z down between walls. Safe per-layer fallback (layer emitted unmodified if run count ≠ wall count). **Untested on hardware — verify on a test print first.** |
+| **Multi-wall spiral vase** (experimental) | `190e114c` | New `spiral_mode_multi_wall` option: with spiral vase on, `wall_loops` may exceed 1 and each wall prints as its own continuous helix of pitch `layer_height`, walls phased `h/N` apart in Z, nozzle hops Z down between walls. Safe per-layer fallback (layer emitted unmodified if run count ≠ wall count). Hardware-verified on an A1 mini (2 walls, PLA): prints continuously with no visible seams or wall-transition artifacts. |
 | **Raw `.gcode` viewer + printing** | `bc4d6fae`, `893fc7df7`, `ed4c8447a` | Restores File → Open G-code… (`Ctrl+Shift+O`; BBL `#if 0`'d the viewer menu), and a raw gcode file now reports its used filaments so the send dialog's AMS mapping UI works instead of blocking with "Not all filaments used in slicing are mapped to the printer". |
 | Plain-text studio logs | `48a84d1d` | Studio logs under `<datadir>/log/` are written as plain text instead of encrypted `.enc` files. |
 | Gyroid sparse infill guardrails | `44316ec7`, `c2b5a3ef1` | Slice-time warning when gyroid sparse infill is selected; BBL process presets default to grid instead of gyroid. |
