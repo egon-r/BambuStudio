@@ -6658,6 +6658,13 @@ void Tab::load_current_preset()
 {
     BOOST_LOG_TRIVIAL(info) <<boost::format("enter, m_type %1%")%Preset::get_type_string(m_type);
     const Preset& preset = m_presets->get_edited_preset();
+
+    // egon-r fork: seed fork-added options that are absent from configs
+    // saved before the fork (e.g. process presets embedded in legacy 3mf
+    // projects). Without the key present, page reload_config() and
+    // ConfigManipulation dereference a null option and crash.
+    if (m_type == Preset::TYPE_PRINT && !m_presets->get_edited_preset().config.has("spiral_mode_multi_wall"))
+        m_presets->get_edited_preset().config.set_key_value("spiral_mode_multi_wall", new ConfigOptionBool(false));
     std::vector<std::string> prev_variant_list;
     int prev_extruder_count = 0;
 
