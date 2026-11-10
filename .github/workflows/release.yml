@@ -1,0 +1,99 @@
+name: Release
+
+# Fork release pipeline (egon-r). Linux x86_64 first; a macOS job can be
+# added later as a sibling that "release" then pulls in via needs/artifacts.
+# Public repo: standard runners are free with unlimited minutes.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: # manual build test; artifacts only, no release
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-linux:
+    name: Build Linux x86_64
+    # Standard runners are free for public repos; skip if made private.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      ver:
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Version
+        run: |
+          ver_pure=$(grep 'set(SLIC3R_VERSION' version.inc | cut -d '"' -f2)
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            ver="$GITHUB_REF_NAME"
+          else
+            ver="V${ver_pure}-$(date +'%Y%m%d')"
+          fi
+          echo "ver=$ver" >> "$GITHUB_ENV"
+          echo "version: $ver"
+
+      - name: Install system dependencies
+        run: sudo ./BuildLinux.sh -ur
+
+      - name: Fix permissions
+        run: sudo chown -R "$USER" ./
+
+      # Same cache shape as upstream build_check_cache.yml: rebuilt only when
+      # deps/** changes. First run pays a full dependency build (~1-2 h);
+      # hits skip the deps step entirely, like upstream's fail-on-cache-miss
+      # split.
+      - name: Restore dependency cache
+        id: deps
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: deps/build/destdir
+          key: ubuntu-24.04-cache-bambustudio_deps-build-${{ hashFiles('deps/**') }}
+
+      - name: Build dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: ./BuildLinux.sh -d
+
+      - name: Build slicer and AppImage
+        run: |
+          ./BuildLinux.sh -isfr
+          mv -n build/BambuStudio_ubu64.AppImage \
+                "build/BambuStudio-egon_Linux_x86_64_${{ env.ver }}.AppImage"
+
+      # Portable prefix layout (bin/ resources/ include/ under opt/BambuStudio),
+      # matching how the fork is deployed locally (rsync over ~/.local/opt/...).
+      - name: Stage portable tarball
+        run: |
+          cd build
+          rm -rf ../stage && mkdir -p ../stage
+          DESTDIR="$GITHUB_WORKSPACE/stage" cmake --install .
+          tar -C ../stage/opt -czf "BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" BambuStudio
+          mv "BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" ../build/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: BambuStudio-egon_Linux_x86_64_${{ env.ver }}
+          path: |
+            build/BambuStudio-egon_Linux_x86_64_${{ env.ver }}.AppImage
+            build/BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz
+          if-no-files-found: error
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "build/BambuStudio-egon_Linux_x86_64_${{ env.ver }}.AppImage" \
+            "build/BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" \
+            --verify-tag --generate-notes
