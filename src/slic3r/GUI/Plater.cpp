@@ -10363,7 +10363,6 @@ public:
     void on_helio_input_dlg(SimpleEvent &);
     void on_helio_process(const PartPlate* expected_plate);
     void on_action_publish(wxCommandEvent &evt);
-    bool confirm_send_only_gcode();
     void on_action_print_plate(SimpleEvent&);
     void on_action_print_all(SimpleEvent&);
     void on_action_export_gcode(SimpleEvent&);
@@ -19636,11 +19635,10 @@ void Plater::priv::on_action_print_plate(SimpleEvent&)
 
     if (!wxGetApp().check_send_print_version_policy()) return;
 
-    if (q->only_gcode_mode()) {
-        if (confirm_send_only_gcode())
-            q->send_to_printer();
-        return;
-    }
+    // egon-r fork: raw gcode files go through the normal SelectMachineDialog
+    // like any other print (AMS mapping works via the PartPlate used-filaments
+    // fallback; SendJob handles gcode-mode transport). Upstream diverted to a
+    // storage-only confirm dialog here.
 
     //BBS
     if (!m_select_machine_dlg) m_select_machine_dlg = new SelectMachineDialog(q);
@@ -19650,18 +19648,6 @@ void Plater::priv::on_action_print_plate(SimpleEvent&)
     record_start_print_preset("print_plate");
 }
 
-bool Plater::priv::confirm_send_only_gcode()
-{
-    MsgNoteDialog dialog(q, _L("Send G-code file"));
-    dialog.AddMessage(
-        _L("Bambu Studio does not support sending .gcode files to print directly. You can send it to the printer and then start printing from the printer."));
-    dialog.AddNote(
-        _L("Note: Printing directly with G-code may cause printing errors. It is recommended to print with 3mf files."));
-    dialog.AddButton(wxID_OK, _L("Send now"), true);
-    dialog.AddButton(wxID_CANCEL, _L("Cancel"), false);
-    dialog.Finalize();
-    return dialog.ShowModal() == wxID_OK;
-}
 
 void Plater::priv::on_action_send_to_multi_machine(SimpleEvent&)
 {
@@ -19791,11 +19777,7 @@ void Plater::priv::on_action_print_all(SimpleEvent&)
 
     if (!wxGetApp().check_send_print_version_policy()) return;
 
-    if (q->only_gcode_mode()) {
-        if (confirm_send_only_gcode())
-            q->send_to_printer(true);
-        return;
-    }
+    // egon-r fork: see on_action_print_plate - raw gcode uses the normal dialog.
 
     //BBS
     if (!m_select_machine_dlg) m_select_machine_dlg = new SelectMachineDialog(q);
