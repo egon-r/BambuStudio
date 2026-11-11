@@ -112,7 +112,12 @@ jobs:
             find . -maxdepth 3 -name "bambu-studio" -o -maxdepth 3 -name "BambuStudio" | head
             exit 1
           fi
-          tar -C ../stage/opt -czf "BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" BambuStudio
+          # Prefix-agnostic: BuildLinux.sh configures the default install
+          # prefix (/usr/local); a packaging prefix like /opt/BambuStudio would
+          # nest differently. Repack everything installed this run under a
+          # single top-level BambuStudio/ directory.
+          tar -C ../stage --transform 's|^\./|BambuStudio/|' \
+              -czf "BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" .
           mv "BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" ../build/
 
       - name: Upload artifacts
