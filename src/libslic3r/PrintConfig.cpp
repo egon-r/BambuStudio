@@ -6136,6 +6136,39 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("spiral_mode_woven", coBool);
+    def->label = L("Woven walls (experimental)");
+    def->tooltip = L("EXPERIMENTAL: with multi-wall spiral vase on, modulate the vertical phase between "
+                     "the wall helices so neighboring walls periodically converge and weld into each "
+                     "other as the lap progresses, distributing re-melted (typically smoother, stronger) "
+                     "joints around the whole perimeter instead of only at corners. Implies multi-wall "
+                     "spiral; needs at least 2 wall loops. Local short Z descents are part of the weave.");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("spiral_mode_weave_amplitude", coFloat);
+    def->label = L("Weave amplitude");
+    def->tooltip = L("EXPERIMENTAL: peak deviation (mm) of the woven wall phase around the constant "
+                     "layer height / wall count offset. Clamped to 45% of that offset so neighboring "
+                     "walls never fully swap order. Higher values weld harder but roughen the surface. "
+                     "0.02 - 0.04 works well at 0.2 mm layer height with 2 walls.");
+    def->sidetext = L("mm");
+    def->mode = comAdvanced;
+    def->min = 0;
+    def->max = 0.2;
+    def->set_default_value(new ConfigOptionFloat(0.03));
+
+    def = this->add("spiral_mode_weave_cells_per_lap", coInt);
+    def->label = L("Weave cells per lap");
+    def->tooltip = L("EXPERIMENTAL: number of weave periods around one lap of the wall (each period "
+                     "contains one convergence/weld and one separation). Capped automatically so a "
+                     "weave cell spans at least 5 mm of path. More cells = denser weld stitching but "
+                     "steeper local Z wiggling.");
+    def->mode = comAdvanced;
+    def->min = 2;
+    def->max = 64;
+    def->set_default_value(new ConfigOptionInt(12));
+
     def = this->add("spiral_mode_smooth", coBool);
     def->label = L("Smooth Spiral");
     def->tooltip = L("Smooth Spiral smoothes out X and Y moves as well"
@@ -8749,7 +8782,8 @@ void DynamicPrintConfig::normalize_fdm()
             opt_n->values.assign(opt_n->values.size(), false);  // Set all values to false.
         }
         {
-            if (!(this->has("spiral_mode_multi_wall") && this->opt<ConfigOptionBool>("spiral_mode_multi_wall", true)->value))
+            if (!((this->has("spiral_mode_multi_wall") && this->opt<ConfigOptionBool>("spiral_mode_multi_wall", true)->value) ||
+                  (this->has("spiral_mode_woven") && this->opt<ConfigOptionBool>("spiral_mode_woven", true)->value)))
                 this->opt<ConfigOptionInt>("wall_loops", true)->value = 1;
             this->opt<ConfigOptionInt>("top_shell_layers", true)->value = 0;
             this->opt<ConfigOptionPercent>("sparse_infill_density", true)->value = 0;
@@ -8799,7 +8833,8 @@ void DynamicPrintConfig::normalize_fdm_1()
             opt_n->values.assign(opt_n->values.size(), false);  // Set all values to false.
         }
         {
-            if (!(this->has("spiral_mode_multi_wall") && this->opt<ConfigOptionBool>("spiral_mode_multi_wall", true)->value))
+            if (!((this->has("spiral_mode_multi_wall") && this->opt<ConfigOptionBool>("spiral_mode_multi_wall", true)->value) ||
+                  (this->has("spiral_mode_woven") && this->opt<ConfigOptionBool>("spiral_mode_woven", true)->value)))
                 this->opt<ConfigOptionInt>("wall_loops", true)->value = 1;
             this->opt<ConfigOptionInt>("top_shell_layers", true)->value = 0;
             this->opt<ConfigOptionPercent>("sparse_infill_density", true)->value = 0;
@@ -10809,7 +10844,7 @@ std::map<std::string, std::string> validate(const FullPrintConfig &cfg, bool und
     if (cfg.spiral_mode && under_cli) {
         // Note that we might want to have more than one perimeter on the bottom
         // solid layers. Multi-wall spiral vase (egon-r fork) allows wall_loops > 1.
-        if (cfg.wall_loops != 1 && !cfg.spiral_mode_multi_wall) {
+        if (cfg.wall_loops != 1 && !cfg.spiral_mode_multi_wall && !cfg.spiral_mode_woven) {
             error_message.emplace("wall_loops", L("Invalid value when spiral vase mode is enabled: ") + std::to_string(cfg.wall_loops));
             //return "Can't make more than one perimeter when spiral vase mode is enabled";
             //return "Can't make less than one perimeter when spiral vase mode is enabled";

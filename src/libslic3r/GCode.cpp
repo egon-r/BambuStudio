@@ -4987,7 +4987,7 @@ GCode::LayerResult GCode::process_layer(
         // egon-r fork: multi-wall spiral vase allows exactly wall_loops perimeter
         // loops per layer (each becomes its own helix in SpiralVase). Otherwise
         // a layer is eligible only with a single perimeter loop.
-        const bool multi_wall        = print.config().spiral_mode_multi_wall;
+        const bool multi_wall = print.config().spiral_mode_multi_wall || print.config().spiral_mode_woven;
         size_t      expected_walls   = 1;
         if (multi_wall && !layer.regions().empty())
             expected_walls = std::max(1, layer.regions().front()->region().config().wall_loops.value);

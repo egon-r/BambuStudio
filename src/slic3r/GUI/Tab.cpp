@@ -3441,6 +3441,9 @@ void TabPrint::build()
         optgroup->append_single_option_line("print_sequence", "sequent-print");
         optgroup->append_single_option_line("spiral_mode", "spiral-vase");
         optgroup->append_single_option_line("spiral_mode_multi_wall", "spiral-vase#multi-wall");
+        optgroup->append_single_option_line("spiral_mode_woven", "spiral-vase#woven");
+        optgroup->append_single_option_line("spiral_mode_weave_amplitude", "spiral-vase#weave-amplitude");
+        optgroup->append_single_option_line("spiral_mode_weave_cells_per_lap", "spiral-vase#weave-cells");
         optgroup->append_single_option_line("spiral_mode_smooth", "spiral-vase#smooth");
         optgroup->append_single_option_line("spiral_mode_max_xy_smoothing", "spiral-vase#max-xy-smoothing");
         optgroup->append_single_option_line("timelapse_type", "Timelapse");
@@ -6663,8 +6666,17 @@ void Tab::load_current_preset()
     // saved before the fork (e.g. process presets embedded in legacy 3mf
     // projects). Without the key present, page reload_config() and
     // ConfigManipulation dereference a null option and crash.
-    if (m_type == Preset::TYPE_PRINT && !m_presets->get_edited_preset().config.has("spiral_mode_multi_wall"))
-        m_presets->get_edited_preset().config.set_key_value("spiral_mode_multi_wall", new ConfigOptionBool(false));
+    if (m_type == Preset::TYPE_PRINT) {
+        auto &edited_config = m_presets->get_edited_preset().config;
+        if (!edited_config.has("spiral_mode_multi_wall"))
+            edited_config.set_key_value("spiral_mode_multi_wall", new ConfigOptionBool(false));
+        if (!edited_config.has("spiral_mode_woven"))
+            edited_config.set_key_value("spiral_mode_woven", new ConfigOptionBool(false));
+        if (!edited_config.has("spiral_mode_weave_amplitude"))
+            edited_config.set_key_value("spiral_mode_weave_amplitude", new ConfigOptionFloat(0.03));
+        if (!edited_config.has("spiral_mode_weave_cells_per_lap"))
+            edited_config.set_key_value("spiral_mode_weave_cells_per_lap", new ConfigOptionInt(12));
+    }
     std::vector<std::string> prev_variant_list;
     int prev_extruder_count = 0;
 

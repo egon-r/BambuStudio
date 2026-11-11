@@ -473,7 +473,8 @@ void ConfigManipulation::update_print_fff_config(DynamicPrintConfig* config, con
                                      config->opt_bool("enable_wrapping_detection"));
     }
     if (config->opt_bool("spiral_mode") && !adjust_spiral_mode_params) {
-        const bool multi_wall = config->has("spiral_mode_multi_wall") && config->opt_bool("spiral_mode_multi_wall");
+        const bool multi_wall = (config->has("spiral_mode_multi_wall") && config->opt_bool("spiral_mode_multi_wall")) ||
+                                (config->has("spiral_mode_woven") && config->opt_bool("spiral_mode_woven"));
         adjust_spiral_mode_params = ((config->opt_int("wall_loops") != 1 && !multi_wall) ||
                                      config->opt_int("top_shell_layers") != 0 || sparse_infill_density != 0 ||
                                      config->opt_bool("enable_support") ||
@@ -503,7 +504,8 @@ void ConfigManipulation::update_print_fff_config(DynamicPrintConfig* config, con
             new_conf.set_key_value("z_direction_outwall_speed_continuous", new ConfigOptionBool(false));
             new_conf.set_key_value("enable_wrapping_detection", new ConfigOptionBool(false));
             if (config->opt_bool("spiral_mode")) {
-                    if (!config->opt_bool("spiral_mode_multi_wall"))
+                    if (!((config->has("spiral_mode_multi_wall") && config->opt_bool("spiral_mode_multi_wall")) ||
+                          (config->has("spiral_mode_woven") && config->opt_bool("spiral_mode_woven"))))
                         new_conf.set_key_value("wall_loops", new ConfigOptionInt(1));
                     new_conf.set_key_value("top_shell_layers", new ConfigOptionInt(0));
                     new_conf.set_key_value("sparse_infill_density", new ConfigOptionPercent(0));

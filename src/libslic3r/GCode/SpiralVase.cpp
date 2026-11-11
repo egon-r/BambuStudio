@@ -280,6 +280,68 @@ std::string SpiralVase::process_layer_multi_wall(const std::string &gcode, bool 
     // Remove layer height from initial Z: base of wall 0.
     z -= layer_height;
 
+    // egon-r fork: woven walls. Superimpose a sinusoidal phase modulation on
+    // each wall's helix; see the emission below for the exact term.
+    // Neighboring walls run the modulation in antiphase (offset r*pi), so the
+    // spacing between them oscillates around layer_height/N: they periodically
+    // converge (the later bead lands next to, and re-melts, the earlier one -
+    // the "weld") and separate again, distributing woven joints around the
+    // whole lap instead of only where perimeter-length mismatch happens to
+    // make the walls cross. Amplitude is clamped below h/(2N) so walls never
+    // swap order; the cell count is capped per wall so one weave cell spans
+    // at least ~5 mm of path (bounds the local Z slope).
+    const bool  woven          = m_config.spiral_mode_woven && wall_count >= 2;
+    const float weave_amp      = std::min((float) m_config.spiral_mode_weave_amplitude.value,
+                                          0.45f * layer_height / (float) wall_count);
+    const int   weave_cells_rq = std::max(1, (int) m_config.spiral_mode_weave_cells_per_lap.value);
+
+    // egon-r fork: woven mode needs Z resolution finer than the raw polygon.
+    // The layer gcode merges each straight into a single G1 (Z is only
+    // assigned at move endpoints), which aliases the weave modulation away
+    // on coarse polygons. Subdivide extruding moves into ~half-cell pieces
+    // so the weave term resolves along the whole path. Requires relative E
+    // (pieces carry E/m); with absolute E the weave still applies, sampled
+    // only at the original move endpoints.
+    std::string layer_gcode = gcode;
+    if (m_config.spiral_mode_woven && wall_count >= 2 && m_config.use_relative_e_distances.value) {
+        std::string subdivided;
+        int sub_run = -1;
+        GCodeReader sub = m_reader; // clone; does not advance m_reader
+        sub.parse_buffer(gcode, [&](GCodeReader &reader, GCodeReader::GCodeLine line) {
+            if (line.cmd_is("G1")) {
+                const float d = line.dist_XY(reader);
+                if (line.extruding(reader) && d > 0.f) {
+                    if (sub_run < 0) sub_run = 0;
+                    const size_t r = (size_t) sub_run;
+                    if (r < run_lengths.size()) {
+                        const int   k_eff_r = std::min(weave_cells_rq, std::max(1, (int) (run_lengths[r] / 5.f)));
+                        const float cell    = run_lengths[r] / (float) k_eff_r;
+                        const int   m       = std::min(64, std::max(1, (int) std::round(d / (cell * 0.5f))));
+                        if (m > 1) {
+                            const float x0 = reader.x(), y0 = reader.y();
+                            const float x1 = line.x(),  y1 = line.y();
+                            const float e1 = line.e();
+                            for (int i = 1; i < m; ++i) {
+                                const float t = (float) i / (float) m;
+                                GCodeReader::GCodeLine piece(line);
+                                piece.set(reader, X, x0 + (x1 - x0) * t);
+                                piece.set(reader, Y, y0 + (y1 - y0) * t);
+                                piece.set(reader, E, e1 / (float) m, 5);
+                                subdivided += piece.raw() + '\n';
+                            }
+                            line.set(reader, E, e1 / (float) m, 5); // last piece: same E slice
+                            // (original endpoint X/Y kept exactly)
+                        }
+                    }
+                } else if (d > 0.f) {
+                    ++sub_run; // travel move: following extrusions belong to the next run
+                }
+            }
+            subdivided += line.raw() + '\n';
+        });
+        layer_gcode = std::move(subdivided);
+    }
+
     const float total_layer_length = std::accumulate(run_lengths.begin(), run_lengths.end(), 0.f);
     const bool  transition_in  = m_transition_layer && m_config.use_relative_e_distances.value;
     const bool  transition_out = last_layer && m_config.use_relative_e_distances.value;
@@ -301,7 +363,7 @@ std::string SpiralVase::process_layer_multi_wall(const std::string &gcode, bool 
     float len_global = 0.f; // cumulative extrusion length across the whole layer (for E ramps)
     int   run        = -1;
 
-    m_reader.parse_buffer(gcode, [&](GCodeReader &reader, GCodeReader::GCodeLine line) {
+    m_reader.parse_buffer(layer_gcode, [&](GCodeReader &reader, GCodeReader::GCodeLine line) {
         if (line.cmd_is("G1")) {
             if (line.has_z()) {
                 // Initial Z move of the layer: replace it with a (redundant)
@@ -320,6 +382,15 @@ std::string SpiralVase::process_layer_multi_wall(const std::string &gcode, bool 
 
                     const float factor_global = len_global / total_layer_length;
                     const float factor_run    = run_len[r] / run_lengths[r];
+                    // Woven phase term: integer cells per lap keeps the
+                    // modulation seamless at the lap seam (sin(2*pi*k) == 0).
+                    float weave_z = 0.f;
+                    if (woven) {
+                        const int   k_eff = std::min(weave_cells_rq, std::max(1, (int) (run_lengths[r] / 5.f)));
+                        const float phase = (float) r * float(M_PI);
+                        weave_z = weave_amp * sinf(2.f * float(M_PI) * (float) k_eff * factor_run + phase);
+                    }
+
                     // Wall r's own helix: base offset r*h/N, ramping a full layer height.
                     const float wall_base = z + (float) r * layer_height / (float) wall_count;
 
@@ -330,7 +401,7 @@ std::string SpiralVase::process_layer_multi_wall(const std::string &gcode, bool 
                         transitionLine.set(reader, E, line.e() * (1 - factor_global), 5);
                         transition_gcode += transitionLine.raw() + '\n';
                     }
-                    line.set(reader, Z, wall_base + factor_run * layer_height);
+                    line.set(reader, Z, wall_base + factor_run * layer_height + weave_z);
 
                     if (smooth_spiral) {
                         SpiralVase::SpiralPoint p(line.x(), line.y());
