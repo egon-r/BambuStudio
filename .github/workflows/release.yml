@@ -118,7 +118,6 @@ jobs:
           # single top-level BambuStudio/ directory.
           tar -C ../stage --transform 's|^\./|BambuStudio/|' \
               -czf "BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" .
-          mv "BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" ../build/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
