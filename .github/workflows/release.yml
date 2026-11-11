@@ -78,6 +78,17 @@ jobs:
           sudo dmesg | grep -iE "killed process|out of memory|oom" | tail -5 || true
           exit $rc
 
+      # Save the deps cache as soon as it exists: the automatic post-job
+      # save only runs when the WHOLE job succeeds, so a failure in any
+      # later step (packaging, release) would otherwise re-pay the full
+      # deps build on every retry.
+      - name: Save dependency cache
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: deps/build/destdir
+          key: ubuntu-24.04-cache-bambustudio_deps-build-${{ hashFiles('deps/**') }}
+
       - name: Report on failure
         if: failure()
         run: sudo dmesg | tail -40 || true
@@ -92,9 +103,15 @@ jobs:
       # matching how the fork is deployed locally (rsync over ~/.local/opt/...).
       - name: Stage portable tarball
         run: |
+          set -x
           cd build
           rm -rf ../stage && mkdir -p ../stage
-          DESTDIR="$GITHUB_WORKSPACE/stage" cmake --install .
+          if ! DESTDIR="$GITHUB_WORKSPACE/stage" cmake --install . ; then
+            echo "== cmake --install failed; build/src contents:"
+            ls -la src/ 2>/dev/null | head -30
+            find . -maxdepth 3 -name "bambu-studio" -o -maxdepth 3 -name "BambuStudio" | head
+            exit 1
+          fi
           tar -C ../stage/opt -czf "BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" BambuStudio
           mv "BambuStudio-egon_Linux_x86_64_${{ env.ver }}-portable.tar.gz" ../build/
 
