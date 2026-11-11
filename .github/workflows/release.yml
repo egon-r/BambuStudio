@@ -42,6 +42,15 @@ jobs:
           echo "ver=$ver" >> "$GITHUB_ENV"
           echo "version: $ver"
 
+      # The deps build tree (OpenCV + OpenVDB + FFMPEG + OCCT + ...) needs
+      # more disk than the runner image leaves free; drop the big preinstalled
+      # toolchains we never touch (~20 GB).
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
       - name: Install system dependencies
         run: sudo ./BuildLinux.sh -ur
 
@@ -61,7 +70,17 @@ jobs:
 
       - name: Build dependencies
         if: steps.deps.outputs.cache-hit != 'true'
-        run: ./BuildLinux.sh -d
+        run: |
+          set +e
+          ./BuildLinux.sh -d
+          rc=$?
+          df -h /
+          sudo dmesg | grep -iE "killed process|out of memory|oom" | tail -5 || true
+          exit $rc
+
+      - name: Report on failure
+        if: failure()
+        run: sudo dmesg | tail -40 || true
 
       - name: Build slicer and AppImage
         run: |
