@@ -4021,6 +4021,15 @@ bool GUI_App::on_init_network(bool try_backup)
 
 void GUI_App::start_network_init_async()
 {
+    // Create the bare managers synchronously: MainFrame-time consumers
+    // (e.g. StatusBasePanel's ctor) assume a DeviceManager exists; the
+    // agent-less "plugin failed" state has always run with these present.
+    // They get set_agent()'d once the worker thread hands over the agent.
+    if (!m_device_manager)
+        m_device_manager = new Slic3r::DeviceManager();
+    if (!m_user_manager)
+        m_user_manager = new Slic3r::UserManager();
+
     BOOST_LOG_TRIVIAL(info) << "network init deferred to worker thread";
     m_network_init_thread = std::thread([this]() {
         bool need_update = false;
