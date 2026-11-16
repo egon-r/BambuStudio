@@ -352,6 +352,7 @@ private:
     Slic3r::UserManager* m_user_manager { nullptr };
     Slic3r::TaskManager* m_task_manager { nullptr };
     NetworkAgent* m_agent { nullptr };
+    std::thread m_network_init_thread; // egon-r launch: worker thread for deferred network-agent construction
 
     wgtFilaManagerStore*            m_fila_manager_store        { nullptr };
     wgtFilaManagerSync*             m_fila_manager_sync         { nullptr };
@@ -361,8 +362,8 @@ private:
     bool                            m_disable_fila_manager      { false };
     std::vector<std::string> need_delete_presets;   // store setting ids of preset
     std::vector<bool> m_create_preset_blocked { false, false, false, false, false, false }; // excceed limit
-    bool m_networking_compatible { false };
-    bool m_networking_need_update { false };
+    std::atomic<bool> m_networking_compatible { false };
+    std::atomic<bool> m_networking_need_update { false };
     bool m_networking_cancel_update { false };
     std::shared_ptr<UpgradeNetworkJob> m_upgrade_network_job;
 
@@ -623,6 +624,7 @@ public:
     static std::string format_display_version();
     std::string     format_IP(const std::string& ip);
     void            show_dialog(wxString msg);
+    void            notification_or_dialog(wxString msg);
     void            push_notification(const MachineObject* obj, wxString msg, wxString title = wxEmptyString, UserNotificationStyle style = UserNotificationStyle::UNS_NORMAL);
     void            reload_settings();
     void            remove_user_presets();
@@ -901,6 +903,9 @@ private:
     bool            on_init_inner();
     void            copy_network_if_available();
     bool            on_init_network(bool try_backup = false);
+    Slic3r::NetworkAgent* load_network_agent(bool try_backup, bool& need_update); // heavy part, GUI-free: dlopen + agent ctor
+    bool            wire_network_agent(Slic3r::NetworkAgent* agent, bool need_update); // fast main-thread wiring
+    void            start_network_init_async();
     void            init_networking_callbacks();
     void            init_app_config();
     void            remove_old_networking_plugins();

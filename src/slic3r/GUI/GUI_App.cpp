@@ -1275,52 +1275,60 @@ void GUI_App::post_init()
     }
 
 //#if BBL_HAS_FIRST_PAGE
-    bool slow_bootup = false;
-    if (app_config->get("slow_bootup") == "true") {
-        slow_bootup = true;
-        BOOST_LOG_TRIVIAL(info) << "slow bootup, won't render gl here.";
-    }
+    // egon-r launch: run the GL/imgui warmup and last-project restore after
+    // the first paint so the main window appears (and stays responsive to
+    // paint/resize) instead of freezing behind the splash for ~2s longer.
     if (!switch_to_3d) {
-        BOOST_LOG_TRIVIAL(info) << "begin load_gl_resources";
-        mainframe->Freeze();
-        plater_->canvas3D()->enable_render(false);
-        mainframe->select_tab(size_t(MainFrame::tp3DEditor));
-        plater_->select_view_3D("3D");
-        //BBS init the opengl resource here
-//#ifdef __linux__
-        if (plater_->canvas3D()->get_wxglcanvas()->IsShownOnScreen()&&plater_->canvas3D()->make_current_for_postinit()) {
-//#endif
-            Size canvas_size = plater_->canvas3D()->get_canvas_size();
-            wxGetApp().imgui()->set_display_size(static_cast<float>(canvas_size.get_width()), static_cast<float>(canvas_size.get_height()));
-            BOOST_LOG_TRIVIAL(info) << "start to init opengl";
-            wxGetApp().init_opengl();
-
-            BOOST_LOG_TRIVIAL(info) << "finished init opengl";
-            plater_->canvas3D()->init();
-
-            BOOST_LOG_TRIVIAL(info) << "finished init canvas3D";
-            wxGetApp().imgui()->new_frame();
-
-            BOOST_LOG_TRIVIAL(info) << "finished init imgui frame";
-            plater_->canvas3D()->enable_render(true);
-
-            if (!slow_bootup) {
-                BOOST_LOG_TRIVIAL(info) << "start to render a first frame for test";
-                plater_->canvas3D()->render(false);
-                BOOST_LOG_TRIVIAL(info) << "finished rendering a first frame for test";
+        CallAfter([this]() {
+            bool slow_bootup = false;
+            if (app_config->get("slow_bootup") == "true") {
+                slow_bootup = true;
+                BOOST_LOG_TRIVIAL(info) << "slow bootup, won't render gl here.";
             }
+            BOOST_LOG_TRIVIAL(info) << "begin load_gl_resources (deferred)";
+            mainframe->Freeze();
+            plater_->canvas3D()->enable_render(false);
+            mainframe->select_tab(size_t(MainFrame::tp3DEditor));
+            plater_->select_view_3D("3D");
+            //BBS init the opengl resource here
 //#ifdef __linux__
-        }
-        else {
-            BOOST_LOG_TRIVIAL(warning) << "Found glcontext not ready, postpone the init";
-        }
+            if (plater_->canvas3D()->get_wxglcanvas()->IsShownOnScreen()&&plater_->canvas3D()->make_current_for_postinit()) {
 //#endif
-        if (is_editor())
-            mainframe->select_tab(size_t(0));
-        mainframe->Thaw();
-        BOOST_LOG_TRIVIAL(info) << "end load_gl_resources";
+                Size canvas_size = plater_->canvas3D()->get_canvas_size();
+                wxGetApp().imgui()->set_display_size(static_cast<float>(canvas_size.get_width()), static_cast<float>(canvas_size.get_height()));
+                BOOST_LOG_TRIVIAL(info) << "start to init opengl";
+                wxGetApp().init_opengl();
+
+                BOOST_LOG_TRIVIAL(info) << "finished init opengl";
+                plater_->canvas3D()->init();
+
+                BOOST_LOG_TRIVIAL(info) << "finished init canvas3D";
+                wxGetApp().imgui()->new_frame();
+
+                BOOST_LOG_TRIVIAL(info) << "finished init imgui frame";
+                plater_->canvas3D()->enable_render(true);
+
+                if (!slow_bootup) {
+                    BOOST_LOG_TRIVIAL(info) << "start to render a first frame for test";
+                    plater_->canvas3D()->render(false);
+                    BOOST_LOG_TRIVIAL(info) << "finished rendering a first frame for test";
+                }
+//#ifdef __linux__
+            }
+            else {
+                BOOST_LOG_TRIVIAL(warning) << "Found glcontext not ready, postpone the init";
+            }
+//#endif
+            if (is_editor())
+                mainframe->select_tab(size_t(0));
+            mainframe->Thaw();
+            BOOST_LOG_TRIVIAL(info) << "end load_gl_resources";
+            plater_->trigger_restore_project(1);
+        });
     }
-    plater_->trigger_restore_project(1);
+    else {
+        plater_->trigger_restore_project(1);
+    }
     //#endif
 
     //BBS: remove GCodeViewer as seperate APP logic
@@ -2110,8 +2118,8 @@ bool GUI_App::check_networking_version()
 
 bool GUI_App::is_compatibility_version()
 {
-    BOOST_LOG_TRIVIAL(info) << boost::format("m_networking_compatible=%1%")%m_networking_compatible;
-    return m_networking_compatible;
+    BOOST_LOG_TRIVIAL(info) << boost::format("m_networking_compatible=%1%")%m_networking_compatible.load();
+    return m_networking_compatible.load();
 }
 
 void GUI_App::cancel_networking_install()
@@ -2295,10 +2303,10 @@ void GUI_App::init_networking_callbacks()
                                     obj->erase_user_access_code();
                                     obj->erase_user_access_dev_ip();
                                     text = wxString::Format(_L("Incorrect password"));
-                                    wxGetApp().show_dialog(text);
+                                    notification_or_dialog(text);
                                 } else {
                                     text = wxString::Format(_L("Connect %s failed! [SN:%s, code=%s]"), from_u8(obj->get_dev_name()), obj->get_dev_id(), msg);
-                                    wxGetApp().show_dialog(text);
+                                    notification_or_dialog(text);
                                 }
                                 event.SetInt(-1);
                             } else if (state == ConnectStatus::ConnectStatusLost) {
@@ -2937,6 +2945,11 @@ int GUI_App::OnExit()
 #ifdef __APPLE__
     UnRegisterMacPowerCallBack();
 #endif
+    // egon-r launch: join the deferred network-agent construction so it cannot
+    // outlive the app (the dlopen/ctor can still be running if the user quits
+    // during the first seconds).
+    if (m_network_init_thread.joinable())
+        m_network_init_thread.join();
 
     Slic3r::HelioQuery::shutdown_background_requests();
 
@@ -3589,13 +3602,12 @@ bool GUI_App::on_init_inner()
     Slic3r::Http::set_extra_headers(extra_headers);
 
     copy_network_if_available();
-    on_init_network();
-
-    if (m_agent && m_agent->is_user_login()) {
-        enable_user_preset_folder(true);
-    } else {
-        enable_user_preset_folder(false);
-    }
+    // egon-r launch: construct the network agent on a worker thread; it costs
+    // ~3.5s (plugin dlopen + closed-source ctor) and the whole GUI already
+    // tolerates a null agent (the "plugin failed to load" state). Login
+    // state / user presets are applied on the GUI thread once it is ready.
+    start_network_init_async();
+    enable_user_preset_folder(false);
 
     // BBS if load user preset failed
     //if (loaded_preset_result != 0) {
@@ -3886,8 +3898,14 @@ void GUI_App::copy_network_if_available()
     return;
 }
 
-bool GUI_App::on_init_network(bool try_backup)
+// egon-r launch: split out the heavy, GUI-independent part of network init.
+// dlopen of the network plugin (+libagora etc., ~50MB) and the closed-source
+// agent construction cost ~3.5s and touch no GUI state, so startup runs them
+// on a worker thread (start_network_init_async) and wires the result on the
+// GUI thread once it is ready.
+Slic3r::NetworkAgent* GUI_App::load_network_agent(bool try_backup, bool& need_update)
 {
+    need_update = false;
     int  load_agent_dll       = Slic3r::NetworkAgent::initialize_network_module(false, !app_config->get_bool("ignore_module_cert"));
     bool create_network_agent = false;
 __retry:
@@ -3900,7 +3918,7 @@ __retry:
                 BOOST_LOG_TRIVIAL(info) << "can not get bambu source module!";
                 m_networking_compatible = false;
                 if (app_config->get("installed_networking") == "1") {
-                    m_networking_need_update = true;
+                    need_update = true;
                 }
             }
             else
@@ -3915,23 +3933,39 @@ __retry:
             }
             BOOST_LOG_TRIVIAL(info) << "version dismatch, need upload network module";
             if (app_config->get("installed_networking") == "1") {
-                m_networking_need_update = true;
+                need_update = true;
             }
         }
     } else {
         BOOST_LOG_TRIVIAL(info) << "load dll failed";
         if (app_config->get("installed_networking") == "1") {
             BOOST_LOG_TRIVIAL(info) << "need upload network module";
-            m_networking_need_update = true;
+            need_update = true;
         }
     }
 
-    if (create_network_agent) {
-        BOOST_LOG_TRIVIAL(info) << boost::format("create network agent...");
-        //std::string data_dir = wxStandardPaths::Get().GetUserDataDir().ToUTF8().data();
-        std::string data_directory = data_dir();
+    if (!create_network_agent)
+        return nullptr;
 
-        m_agent = new Slic3r::NetworkAgent(data_directory);
+    BOOST_LOG_TRIVIAL(info) << boost::format("create network agent...");
+    std::string data_directory = data_dir();
+    auto* agent = new Slic3r::NetworkAgent(data_directory);
+    //BBS set config dir
+    agent->set_config_dir(data_directory);
+    //BBS start http log
+    agent->init_log();
+    //BBS set cert dir
+    agent->set_cert_file(resources_dir() + "/cert", "slicer_base64.cer");
+    return agent;
+}
+
+bool GUI_App::wire_network_agent(Slic3r::NetworkAgent* agent, bool need_update)
+{
+    if (need_update && app_config->get("installed_networking") == "1")
+        m_networking_need_update = true;
+
+    if (agent) {
+        m_agent = agent;
 
         if (!m_device_manager)
             m_device_manager = new Slic3r::DeviceManager(m_agent);
@@ -3954,30 +3988,14 @@ __retry:
             m_device_manager->EnableMultiMachine(false);
         }
 
-        //BBS set config dir
-        if (m_agent) {
-            m_agent->set_config_dir(data_directory);
-        }
-        //BBS start http log
-        if (m_agent) {
-            m_agent->init_log();
-        }
-
-        //BBS set cert dir
-        if (m_agent)
-            m_agent->set_cert_file(resources_dir() + "/cert", "slicer_base64.cer");
-
         init_http_extra_header();
-
-        if (m_agent) {
-            init_networking_callbacks();
-            std::string country_code = app_config->get_country_code();
-            m_agent->set_country_code(country_code);
-            m_agent->start();
-            m_load_last_machine.InnerLoad(m_agent, getDeviceManager());
-            if (auto dev = getDeviceManager()) {
-                dev->restore_local_machines_from_user_access_config();
-            }
+        init_networking_callbacks();
+        std::string country_code = app_config->get_country_code();
+        m_agent->set_country_code(country_code);
+        m_agent->start();
+        m_load_last_machine.InnerLoad(m_agent, getDeviceManager());
+        if (auto dev = getDeviceManager()) {
+            dev->restore_local_machines_from_user_access_config();
         }
     }
     else {
@@ -3992,6 +4010,40 @@ __retry:
     }
 
     return true;
+}
+
+bool GUI_App::on_init_network(bool try_backup)
+{
+    bool need_update = false;
+    Slic3r::NetworkAgent* agent = load_network_agent(try_backup, need_update);
+    return wire_network_agent(agent, need_update);
+}
+
+void GUI_App::start_network_init_async()
+{
+    BOOST_LOG_TRIVIAL(info) << "network init deferred to worker thread";
+    m_network_init_thread = std::thread([this]() {
+        bool need_update = false;
+        Slic3r::NetworkAgent* agent = load_network_agent(false, need_update);
+        // Hand the constructed agent back to the GUI thread for wiring.
+        CallAfter([this, agent, need_update]() {
+            if (is_closing()) {
+                delete agent;
+                return;
+            }
+            wire_network_agent(agent, need_update);
+            // Apply login state now that the agent exists; mirrors what
+            // on_init_inner did synchronously (and the runtime-login path).
+            if (m_agent && m_agent->is_user_login()) {
+                enable_user_preset_folder(true);
+                preset_bundle->load_user_presets(m_agent->get_user_id(), ForwardCompatibilitySubstitutionRule::Enable);
+                if (mainframe)
+                    mainframe->update_side_preset_ui();
+            }
+            if (app_config->get("sync_user_preset") == "true")
+                start_sync_user_preset();
+        });
+    });
 }
 
 unsigned GUI_App::get_colour_approx_luma(const wxColour &colour)
@@ -6778,6 +6830,18 @@ void GUI_App::show_dialog(wxString msg)
         m_info_dialog_content = msg;
     }
 }
+// egon-r: show transient status as an in-app notification instead of a modal dialog.
+// Falls back to the old modal dialog if the plater (and its notification manager)
+// is not available yet.
+void GUI_App::notification_or_dialog(wxString msg)
+{
+    if (this->plater() && this->plater()->get_notification_manager()) {
+        this->plater()->get_notification_manager()->push_notification(into_u8(msg));
+    } else {
+        show_dialog(msg);
+    }
+}
+
 
 void  GUI_App::push_notification(const MachineObject* obj, wxString msg, wxString title, UserNotificationStyle style)
 {
@@ -8941,7 +9005,7 @@ void GUI_App::check_updates(const bool verbose)
     PresetUpdater::UpdateResult updater_result;
     try {
         //updater_result = preset_updater->config_update(app_config->orig_version(), verbose ? PresetUpdater::UpdateParams::SHOW_TEXT_BOX : PresetUpdater::UpdateParams::SHOW_NOTIFICATION);
-        updater_result = preset_updater->config_update(app_config->orig_version(), PresetUpdater::UpdateParams::SHOW_TEXT_BOX);
+        updater_result = preset_updater->config_update(app_config->orig_version(), verbose ? PresetUpdater::UpdateParams::SHOW_TEXT_BOX : PresetUpdater::UpdateParams::SHOW_NOTIFICATION);
         if (updater_result == PresetUpdater::R_INCOMPAT_EXIT) {
             MessageDialog msg_dlg(mainframe, m_install_preset_fail_text, _L("Install presets failed"), wxOK | wxICON_WARNING);
             msg_dlg.ShowModal();
