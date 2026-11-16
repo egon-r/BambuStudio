@@ -52,7 +52,12 @@ jobs:
           df -h /
 
       - name: Install system dependencies
-        run: sudo ./BuildLinux.sh -ur
+        run: |
+          sudo ./BuildLinux.sh -ur
+          # ccache for the slicer TU compile: repeat runs skip most of the
+          # ~1h g++ work; the deps build above stays uncached-agnostic.
+          sudo apt-get install -y ccache
+          ccache --version | head -1
 
       - name: Fix permissions
         run: sudo chown -R "$USER" ./
@@ -93,9 +98,28 @@ jobs:
         if: failure()
         run: sudo dmesg | tail -40 || true
 
+      # Rolling compiler cache for the slicer build. Exact-key misses fall
+      # back to the newest prefix match, so incremental commits reuse most
+      # objects (deps cache above already covers the dependency build).
+      - name: Restore ccache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/.cache/ccache
+          key: ccache-ubuntu-24.04-${{ github.sha }}
+          restore-keys: |
+            ccache-ubuntu-24.04-
+
       - name: Build slicer and AppImage
+        env:
+          # Route the g++/gcc invocations through ccache (picked up by the
+          # cmake configure inside BuildLinux.sh).
+          CC: ccache gcc
+          CXX: ccache g++
+          # Single cache entries are capped at 5 GiB (10 GiB per repo).
+          CCACHE_MAXSIZE: 4G
         run: |
           ./BuildLinux.sh -isfr
+          ccache --show-stats --verbose | tail -20 || ccache -s || true
           mv -n build/BambuStudio_ubu64.AppImage \
                 "build/BambuStudio-egon_Linux_x86_64_${{ env.ver }}.AppImage"
 
