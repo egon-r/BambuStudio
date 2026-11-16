@@ -18,6 +18,7 @@ section is the upstream README.
 | Gyroid sparse infill guardrails | `44316ec7`, `c2b5a3ef1` | Slice-time warning when gyroid sparse infill is selected; BBL process presets default to grid instead of gyroid. |
 | Vibration Compensation toggle | `1337b4478` | Toggle in the send/print dialog. |
 | TreeSupport enforcer bounds fix | `a3c09c93a` | Bounds-checks enforcers before per-layer access (crash fix). |
+| Fast startup | `fc65b393`, `b90ef3bb` | Startup cut from ~8.1 s to a visible window at ~4 s and no blocking modal: the ~3.5 s network-plugin load + closed-source agent ctor now run on a worker thread (bare DeviceManager/UserManager exist immediately, `set_agent()` when ready — same state as a failed plugin load, which the app always supported); the GL/imgui warmup and last-project restore run after the first paint via `CallAfter`; the automatic config-update check and connect-failed dialogs are in-app notifications instead of modal `ShowModal` popups (Help → Check for updates stays modal). Runner: `37a6dee0` routes the slicer compile through ccache. |
 
 ---
 
